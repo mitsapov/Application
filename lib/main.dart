@@ -1,5 +1,8 @@
 // Импорт необходимых пакетов Flutter
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';// Импорт пакета для работы с SQLite базой данных
+import 'database_helper.dart';
+// Импорт модели данных Task из локального файла
+import 'task.dart';
 
 /// Функция main() - точка входа в приложение Flutter
 /// Все приложения Flutter должны иметь функцию main(), которая запускает приложение
@@ -28,35 +31,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// Класс Task представляет модель данных для задачи
-/// Содержит три поля: id, title и isCompleted
-class Task {
-  final String id; // Уникальный идентификатор задачи
-  String title; // Название задачи
-  bool isCompleted; // Статус выполнения задачи
-
-  /// Конструктор класса Task
-  Task({
-    required this.id, // Обязательный параметр id
-    required this.title, // Обязательный параметр title
-    this.isCompleted = false, // Необязательный параметр, по умолчанию false
-  });
-
-  /// Метод copyWith создает копию задачи с возможностью изменения полей
-  /// Это распространенный паттерн в Flutter для работы с неизменяемыми данными
-  Task copyWith({
-    String? id,
-    String? title,
-    bool? isCompleted,
-  }) {
-    return Task(
-      id: id ?? this.id, // Если id не указан, используем текущий
-      title: title ?? this.title, // Если title не указан, используем текущий
-      isCompleted: isCompleted ?? this.isCompleted, // Если isCompleted не указан, используем текущий
-    );
-  }
-}
-
 /// Класс TaskManagerScreen - основной экран приложения
 /// Наследуется от StatefulWidget, так как требует изменения состояния
 class TaskManagerScreen extends StatefulWidget {
@@ -79,13 +53,16 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
   /// Переменная для отслеживания задачи, которую редактируют
   /// Если null - значит, мы добавляем новую задачу, а не редактируем существующую
   Task? _editingTask;
+  
+  /// Экземпляр DatabaseHelper для работы с базой данных
+  /// Используем паттерн Singleton для доступа к базе данных
+  final DatabaseHelper _dbHelper = DatabaseHelper();
 
   @override
   void initState() {
     /// initState() вызывается один раз при создании виджета
-    /// Так же здесь можно выполнить инициализацию данных
     super.initState();
-    // Так же здесь можно загрузить сохраненные задачи (опционально)
+    _loadTasks(); // Загружаем задачи из БД при инициализации
   }
 
   @override
@@ -93,20 +70,31 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
     /// dispose() вызывается при удалении виджета из дерева
     /// Здесь нужно освобождать ресурсы (контроллеры, подписки и т.д.)
     _taskInputController.dispose(); // Освобождаем контроллер
+    _dbHelper.close(); // Закрываем соединение с БД
     super.dispose();
+  }
+
+  /// Загрузка задач из базы данных
+  /// 
+  /// Все операции с БД являются асинхронными, используем await
+  Future<void> _loadTasks() async {
+    final tasks = await _dbHelper.getAllTasks();
+    setState(() {
+      _tasks.clear();
+      _tasks.addAll(tasks);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     /// Расчет количества выполненных задач
-    /// СОВЕТ: Функциональный подход к обработке коллекций часто более читаем
     final completedTasksCount = _tasks.where((task) => task.isCompleted).length;
     
     /// Scaffold обеспечивает базовую структуру экрана Material Design
     /// Содержит AppBar, тело экрана и FloatingActionButton
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Менеджер задач'), // Заголовок AppBar
+        title: const Text('DoLis'), // Заголовок AppBar
         actions: [
           /// Отображение счетчика выполненных задач в виде Chip в AppBar
           Padding(
@@ -221,9 +209,20 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
             color: task.isCompleted ? Colors.grey : null,
           ),
         ),
-        trailing: IconButton(
-          icon: const Icon(Icons.edit), // Иконка редактирования
-          onPressed: () => _startEditingTask(task), // Обработчик нажатия
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Кнопка редактирования
+            IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: () => _startEditingTask(task),
+            ),
+            // Кнопка удаления
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () => _confirmDelete(task), // Подтверждение удаления
+            ),
+          ],
         ),
       ),
     );
@@ -240,10 +239,10 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
   }
 
   /// Метод для добавления или редактирования задачи
-  void _addOrEditTask() {
+  Future<void> _addOrEditTask() async {
     final text = _taskInputController.text.trim(); // Получаем и очищаем текст
     
-    /// Всегда проверяем ввод пользователя
+    /// Проверяем ввод пользователя
     if (text.isEmpty) return; // Игнорируем пустой ввод
 
     /// setState() уведомляет Flutter о изменении состояния
@@ -253,7 +252,9 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
         // Режим редактирования существующей задачи
         final index = _tasks.indexWhere((t) => t.id == _editingTask!.id);
         if (index != -1) {
-          _tasks[index] = _tasks[index].copyWith(title: text); // Обновляем задачу
+          final updatedTask = _tasks[index].copyWith(title: text);
+          _tasks[index] = updatedTask;
+          _dbHelper.updateTask(updatedTask); // Обновляем в БД
         }
         _editingTask = null; // Сбрасываем режим редактирования
       } else {
@@ -262,7 +263,8 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
           id: DateTime.now().millisecondsSinceEpoch.toString(), // Генерируем уникальный id
           title: text,
         );
-        _tasks.add(newTask); // Добавляем задачу в список
+        _tasks.add(newTask);
+        _dbHelper.insertTask(newTask); // Сохраняем в БД
       }
       _taskInputController.clear(); // Очищаем поле ввода
     });
@@ -309,20 +311,55 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
     );
   }
 
+  /// Метод для подтверждения удаления через кнопку
+  /// 
+  /// Предоставляем пользователю два способа удаления:
+  /// через свайп и через кнопку
+  Future<void> _confirmDelete(Task task) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Удаление задачи'),
+          content: Text('Вы уверены, что хотите удалить задачу "${task.title}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Удалить', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      _deleteTask(task);
+    }
+  }
+
   /// Метод для удаления задачи
-  void _deleteTask(Task task) {
+  Future<void> _deleteTask(Task task) async {
+    // Сначала удаляем из БД
+    await _dbHelper.deleteTask(task.id);
+    
+    // Затем обновляем UI
     setState(() {
-      _tasks.removeWhere((t) => t.id == task.id); // Удаляем задачу из списка
+      _tasks.removeWhere((t) => t.id == task.id);
     });
     
-    /// Показываем уведомление об удалении с возможностью отмены
+    // Показываем уведомление с возможностью отмены
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Задача "${task.title}" удалена'),
         action: SnackBarAction(
           label: 'Отменить',
-          onPressed: () {
-            // Возвращаем задачу при отмене удаления
+          onPressed: () async {
+            // Восстанавливаем задачу
+            await _dbHelper.insertTask(task);
             setState(() {
               _tasks.add(task);
             });
@@ -333,12 +370,17 @@ class _TaskManagerScreenState extends State<TaskManagerScreen> {
   }
 
   /// Метод для переключения статуса выполнения задачи
-  void _toggleTaskCompletion(Task task, bool isCompleted) {
+  Future<void> _toggleTaskCompletion(Task task, bool isCompleted) async {
+    final updatedTask = task.copyWith(isCompleted: isCompleted);
+    
+    // Сначала обновляем в БД
+    await _dbHelper.updateTask(updatedTask);
+    
+    // Затем обновляем UI
     setState(() {
       final index = _tasks.indexWhere((t) => t.id == task.id);
       if (index != -1) {
-        // Обновляем статус выполнения задачи
-        _tasks[index] = _tasks[index].copyWith(isCompleted: isCompleted);
+        _tasks[index] = updatedTask;
       }
     });
   }
