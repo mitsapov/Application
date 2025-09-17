@@ -1,0 +1,126 @@
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Task Manager',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: TaskScreen(),
+    );
+  }
+}
+
+class TaskScreen extends StatefulWidget {
+  @override
+  _TaskScreenState createState() => _TaskScreenState();
+}
+
+class _TaskScreenState extends State<TaskScreen> {
+  List<String> tasks = [];
+  final TextEditingController _controller = TextEditingController();
+
+  // Добавление задачи
+  void _addTask() {
+    if (_controller.text.isNotEmpty) {
+      setState(() {
+        tasks.add(_controller.text);
+        _controller.clear();
+      });
+    }
+  }
+
+  // Удаление задачи
+  void _deleteTask(int index) {
+    setState(() {
+      tasks.removeAt(index);
+    });
+  }
+
+  // Редактирование задачи
+  void _editTask(int index, String newText) {
+    if (newText.isNotEmpty) {
+      setState(() {
+        tasks[index] = newText;
+      });
+    }
+  }
+
+  // Диалог редактирования
+  void _showEditDialog(int index) {
+    final editController = TextEditingController(text: tasks[index]);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text("Edit Task"),
+          content: TextField(controller: editController),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _editTask(index, editController.text);
+                Navigator.pop(context);
+              },
+              child: Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text("Task Manager")),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: InputDecoration(hintText: "Enter a task"),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.add),
+                  onPressed: _addTask,
+                ),
+              ],
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: tasks.length,
+                itemBuilder: (context, index) {
+                  return ListTile(
+                    title: Text(tasks[index]),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () => _showEditDialog(index),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _deleteTask(index),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
